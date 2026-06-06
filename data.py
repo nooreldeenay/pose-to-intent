@@ -22,14 +22,39 @@ from torch.utils.data import Dataset
 # ---------------------------------------------------------------------------
 
 IMG_W, IMG_H = 1920, 1080
-IMG_PATH = os.path.expanduser('~/thesis_project/JAAD/images')
 
 OBS_LENGTH = 16
 TIME_TO_EVENT = [30, 60]
 OVERLAP = 0.8
 
-POSE_PATH = os.path.expanduser('~/ped_data/jaad/poses/pose_set01.pkl')
-SEG_CACHE_PATH = os.path.expanduser('~/ped_data/jaad/seg_last_frame_mask2former')
+
+def _get_path(env_var, default):
+    """Get path from environment variable, with fallback default."""
+    val = os.environ.get(env_var)
+    if val is not None:
+        return os.path.expanduser(val)
+    return os.path.expanduser(default)
+
+
+def get_jaad_path():
+    """Get JAAD dataset path from JAAD_PATH environment variable."""
+    val = os.environ.get('JAAD_PATH')
+    if val is None:
+        raise EnvironmentError(
+            "JAAD_PATH not set. Run: export JAAD_PATH=/path/to/JAAD"
+        )
+    return val
+
+
+def get_pose_path():
+    """Get pose cache path from POSE_CACHE_DIR environment variable."""
+    cache_dir = os.environ.get('POSE_CACHE_DIR', '~/ped_data/jaad/poses')
+    return os.path.join(os.path.expanduser(cache_dir), 'pose_set01.pkl')
+
+
+def get_seg_cache_path():
+    """Get seg map cache path from SEG_CACHE_DIR environment variable."""
+    return os.path.expanduser(os.environ.get('SEG_CACHE_DIR', '~/ped_data/jaad/seg_maps'))
 
 CITYSCAPES_COLORS = np.array([
     [128, 64, 128], [244, 35, 232], [70, 70, 70], [102, 102, 156], [190, 153, 153],
@@ -55,7 +80,7 @@ def load_raw_data(jaad_path: str, split: str, min_track_size: int = 76,
     sys.path.insert(0, jaad_path)
     from jaad_data import JAAD
 
-    print(f"  Loading JAAD database...", end=' ', flush=True)
+    print(f"  Loading JAAD database from {jaad_path}...", end=' ', flush=True)
     imdb = JAAD(data_path=jaad_path)
     print("done")
 
@@ -379,9 +404,12 @@ def interpolate_poses(poses: np.ndarray):
 
 
 def load_poses(image_seqs: np.ndarray, ped_ids: np.ndarray,
-               pose_path: str = POSE_PATH,
+               pose_path: str = None,
                interp: bool = True):
     """Load and optionally interpolate pose data."""
+    if pose_path is None:
+        pose_path = get_pose_path()
+
     print(f"  Loading poses from {pose_path}...", end=' ', flush=True)
     with open(pose_path, 'rb') as f:
         try:
@@ -535,11 +563,14 @@ def compute_pose_features(poses, pose_status):
 # ---------------------------------------------------------------------------
 
 def load_seg_crops(image_seqs: np.ndarray, box_raw: np.ndarray,
-                   seg_cache_path: str = SEG_CACHE_PATH,
+                   seg_cache_path: str = None,
                    dual_frame: bool = False,
                    frame_indices: list = None,
                    debug_vis: bool = False) -> np.ndarray:
     """Load segmentation crops from cache."""
+    if seg_cache_path is None:
+        seg_cache_path = get_seg_cache_path()
+
     N, T, _ = image_seqs.shape
 
     if dual_frame:
@@ -699,14 +730,30 @@ class JAADDataset(Dataset):
 # Full pipeline
 # ---------------------------------------------------------------------------
 
-def build_data(jaad_path: str, split: str, sample_type: str = 'all',
+def build_data(jaad_path: str = None, split: str = 'all', sample_type: str = 'all',
                use_pose: bool = False, use_seg: bool = False,
                use_enriched_bbox: bool = False,
                use_vehicle: bool = False,
                use_traffic: bool = False,
                seg_dual_frame: bool = False,
                norm_method: str = 'none') -> dict:
-    """Full pipeline: load raw -> window -> add modalities."""
+    """Full pipeline: load raw -> window -> add modalities.
+
+    Args:
+        jaad_path: Path to JAAD dataset. If None, uses JAAD_PATH env var.
+        split: Data split ('train', 'val', 'test')
+        sample_type: 'all' or 'beh' for behavior-only subset
+        use_pose: Load pose keypoints
+        use_seg: Load segmentation crops
+        use_enriched_bbox: Compute enriched bbox features
+        use_vehicle: Load vehicle actions
+        use_traffic: Load traffic context
+        seg_dual_frame: Load dual-frame seg crops (first+last)
+        norm_method: Normalization method for bbox features
+    """
+    if jaad_path is None:
+        jaad_path = get_jaad_path()
+
     print(f"\n  === Building {split} data ===")
 
     min_track_size = OBS_LENGTH + TIME_TO_EVENT[1]

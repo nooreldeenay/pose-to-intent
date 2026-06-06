@@ -1,6 +1,7 @@
 """Evaluate a trained model on the test set.
 
 Usage:
+    export JAAD_PATH=/path/to/JAAD
     python evaluate_model.py --model_path <path_to_checkpoint> --model_type <teacher|student_conv1d|student_gru|student_transformer>
 """
 
@@ -13,11 +14,9 @@ import torch
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, os.path.dirname(__file__))
-from data import build_data, compute_pose_features, JAADDataset
+from data import build_data, compute_pose_features, JAADDataset, get_jaad_path
 from models import build_model
 from evaluate import evaluate, get_predictions
-
-JAAD_PATH = '/home/nour/thesis_project/JAAD'
 
 
 def main():
@@ -38,9 +37,11 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
 
+    jaad_path = get_jaad_path()
+
     # Load data
     print("\n=== Loading test data ===")
-    test_data = build_data(JAAD_PATH, 'test', sample_type='all',
+    test_data = build_data(jaad_path, 'test', sample_type='all',
                            use_enriched_bbox=True, use_seg=True, seg_dual_frame=True,
                            use_pose=True, use_vehicle=True, use_traffic=True,
                            norm_method='bbox_size')

@@ -4,6 +4,7 @@ Teacher: B+S+P+T+V with Transformer temporal processing.
 ~430K params, AUC=0.934, F1=0.727 (3-seed, JAAD all).
 
 Usage:
+    export JAAD_PATH=/path/to/JAAD
     python train_teacher.py
 """
 
@@ -17,15 +18,14 @@ import torch.nn as nn
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from data import build_data, compute_pose_features
+from data import build_data, compute_pose_features, get_jaad_path
 from models import TeacherModel
 from train import train_one_epoch
 from evaluate import evaluate, get_predictions
 
 warnings.filterwarnings('ignore', message='.*enable_nested_tensor.*')
 
-JAAD_PATH = '/home/nour/thesis_project/JAAD'
-SAVE_ROOT = os.path.expanduser('~/ped_data/pose_to_intent/teacher')
+SAVE_ROOT = os.path.expanduser(os.environ.get('SAVE_DIR', '~/ped_data/pose_to_intent/teacher'))
 SEEDS = [43]
 EPOCHS = 20
 BATCH_SIZE = 32
@@ -120,14 +120,16 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
 
+    jaad_path = get_jaad_path()
+
     print("\n=== Loading data ===")
-    train_data = build_data(JAAD_PATH, 'train', use_enriched_bbox=True,
+    train_data = build_data(jaad_path, 'train', use_enriched_bbox=True,
                             seg_dual_frame=True, norm_method='bbox_size',
                             use_pose=True, use_traffic=True, use_vehicle=True)
-    val_data = build_data(JAAD_PATH, 'val', use_enriched_bbox=True,
+    val_data = build_data(jaad_path, 'val', use_enriched_bbox=True,
                           seg_dual_frame=True, norm_method='bbox_size',
                           use_pose=True, use_traffic=True, use_vehicle=True)
-    test_data = build_data(JAAD_PATH, 'test', use_enriched_bbox=True,
+    test_data = build_data(jaad_path, 'test', use_enriched_bbox=True,
                            seg_dual_frame=True, norm_method='bbox_size',
                            use_pose=True, use_traffic=True, use_vehicle=True)
 

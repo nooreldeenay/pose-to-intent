@@ -6,11 +6,11 @@ Pedestrian crossing prediction using pose, bbox, segmentation, traffic, and vehi
 
 This repository contains:
 
-1. **Teacher Model** (TrafficVehicleTransformer): B+S+P+T+V with Transformer temporal processing (~430K params, AUC=0.934, F1=0.727)
-2. **Student Models**: Lightweight models (~53K params) trained with/without knowledge distillation
-   - StudentConv1D: Conv1D k=3 + k=7 (best, AUC=0.864)
-   - StudentGRU: 2-layer GRU
-   - StudentTransformer: 2-layer Transformer
+1. **Keypoint Extraction** (`extract_poses.py`): ViTPose-based pose estimation
+2. **Segmentation Extraction** (`extract_seg_maps.py`): Mask2Former semantic segmentation
+3. **Teacher Model** (`train_teacher.py`): TrafficVehicleTransformer (~430K params, AUC=0.934)
+4. **Student Models** (`train_student.py`): Lightweight models (~53K params) with/without KD
+5. **Evaluation** (`evaluate_model.py`): Test any trained checkpoint
 
 ## Requirements
 
@@ -19,19 +19,75 @@ This repository contains:
 - NumPy
 - OpenCV
 - scikit-learn
-- tqdm (optional)
+- transformers (HuggingFace)
+- tqdm
 
-## Data Setup
+Install dependencies:
+```bash
+pip install torch numpy opencv-python scikit-learn transformers tqdm
+```
 
-1. Clone the JAAD dataset to `~/thesis_project/JAAD/`
-2. Extract pose data to `~/ped_data/jaad/poses/pose_set01.pkl`
-3. Extract segmentation crops to `~/ped_data/jaad/seg_last_frame_mask2former/`
+## Environment Variables
 
-## Usage
+Set these before running any script:
+
+```bash
+# Required: Path to JAAD dataset
+export JAAD_PATH=/path/to/JAAD
+
+# Optional: Override default cache directories
+export POSE_CACHE_DIR=~/ped_data/jaad/poses
+export SEG_CACHE_DIR=~/ped_data/jaad/seg_maps
+export SAVE_DIR=~/ped_data/pose_to_intent
+```
+
+## Data Preparation
+
+### Step 1: Extract Keypoints
+
+Extract ViTPose keypoints for all frames in the JAAD dataset:
+
+```bash
+export JAAD_PATH=/path/to/JAAD
+python extract_poses.py
+```
+
+This saves 34-D pose vectors (17 keypoints x 2 coordinates) to `$POSE_CACHE_DIR/pose_set01.pkl`.
+
+Options:
+- `--regen_data`: Recompute all poses (ignore cache)
+- `--splits train val test`: Process specific splits
+- `--model usyd-community/vitpose-base-simple`: Use different ViTPose model
+
+### Step 2: Extract Segmentation Maps
+
+Extract Mask2Former semantic segmentation maps for all frames:
+
+```bash
+export JAAD_PATH=/path/to/JAAD
+python extract_seg_maps.py
+```
+
+This saves uint8 seg maps (19 Cityscapes classes) to `$SEG_CACHE_DIR/<vid_id>/<frame>.npy`.
+
+Options:
+- `--regen_data`: Recompute all seg maps (ignore cache)
+- `--splits train val test`: Process specific splits
+
+### Step 3: Verify Data
+
+After extraction, verify the cache directories exist:
+```bash
+ls $POSE_CACHE_DIR/pose_set01.pkl
+ls $SEG_CACHE_DIR/
+```
+
+## Training
 
 ### Train Teacher Model
 
 ```bash
+export JAAD_PATH=/path/to/JAAD
 python train_teacher.py
 ```
 
@@ -40,6 +96,8 @@ Trains the TrafficVehicleTransformer teacher model with SWA (average last 10 epo
 ### Train Student Model
 
 ```bash
+export JAAD_PATH=/path/to/JAAD
+
 # Without knowledge distillation
 python train_student.py --model conv1d --hidden 64
 
@@ -56,11 +114,18 @@ python train_student.py --model conv1d --hidden 64 --use_bbox
 python train_student.py --model conv1d --hidden 64 --activation gelu
 ```
 
-### Evaluate Model
+## Evaluation
+
+Evaluate any trained checkpoint:
 
 ```bash
-python evaluate_model.py --model_path <path_to_checkpoint> --model_type teacher
-python evaluate_model.py --model_path <path_to_checkpoint> --model_type student_conv1d
+export JAAD_PATH=/path/to/JAAD
+
+# Evaluate teacher
+python evaluate_model.py --model_path /path/to/teacher/best_model.pt --model_type teacher
+
+# Evaluate student
+python evaluate_model.py --model_path /path/to/student/best_model.pt --model_type student_conv1d
 ```
 
 ## Model Architecture
@@ -68,25 +133,25 @@ python evaluate_model.py --model_path <path_to_checkpoint> --model_type student_
 ### Teacher (TrafficVehicleTransformer)
 
 ```
-Bbox Stream:    Linear(14→64) → Transformer(2 layers, 4 heads) → mean pooling
-Seg Stream:     Embedding(19→16) → CNN(3 layers) → Attention pooling → Linear(64→64)
-Pose Stream:    Linear(49→64) → Conv1D(k=3) + Conv1D(k=7) → Linear(128→64)
-Traffic Stream: Linear(5→64) → Transformer(2 layers, 4 heads) → mean pooling
-Vehicle Stream: Linear(5→64) → Transformer(2 layers, 4 heads) → mean pooling
-Classifier:     Linear(64×5→1)
+Bbox Stream:    Linear(14->64) -> Transformer(2 layers, 4 heads) -> mean pooling
+Seg Stream:     Embedding(19->16) -> CNN(3 layers) -> Attention pooling -> Linear(64->64)
+Pose Stream:    Linear(49->64) -> Conv1D(k=3) + Conv1D(k=7) -> Linear(128->64)
+Traffic Stream: Linear(5->64) -> Transformer(2 layers, 4 heads) -> mean pooling
+Vehicle Stream: Linear(5->64) -> Transformer(2 layers, 4 heads) -> mean pooling
+Classifier:     Linear(64*5->1)
 ```
 
 ### Student (StudentConv1D)
 
 ```
-Pose Stream:    Linear(49→64) → Conv1D(k=3) + Conv1D(k=7) → Linear(128→64)
-Classifier:     Linear(64→1)
+Pose Stream:    Linear(49->64) -> Conv1D(k=3) + Conv1D(k=7) -> Linear(128->64)
+Classifier:     Linear(64->1)
 ```
 
 ## Feature Engineering
 
 ### Pose Features (49-D)
-- 34-D raw keypoints (17 keypoints × 2 coordinates)
+- 34-D raw keypoints (17 keypoints x 2 coordinates)
 - 12-D engineered features:
   - Head direction (nose - ear center)
   - Body direction (shoulder - hip)
@@ -107,7 +172,7 @@ Classifier:     Linear(64→1)
 
 ### Segmentation Crops
 - Dual-frame (first + last observation frame)
-- 224×224 pixel crops from Mask2Former semantic segmentation
+- 224x224 pixel crops from Mask2Former semantic segmentation
 - 19 Cityscapes classes
 
 ### Traffic Context (5-D)
@@ -118,7 +183,7 @@ Classifier:     Linear(64→1)
 
 ## Training Details
 
-- **Loss**: BCEWithLogitsLoss with pos_weight = raw_pos_weight × 0.25
+- **Loss**: BCEWithLogitsLoss with pos_weight = raw_pos_weight x 0.25
 - **Optimizer**: Adam (lr=1e-3, weight_decay=0.0)
 - **Scheduler**: Linear warmup (5 epochs) + Cosine annealing
 - **SWA**: Average last 10 epochs
@@ -130,14 +195,23 @@ Classifier:     Linear(64→1)
 
 ### Output-Level KD
 KL divergence between teacher and student soft predictions:
-$$\mathcal{L}_{KD} = \alpha \cdot T^2 \cdot KL(p_T \| p_S) + (1-\alpha) \cdot BCE(y, p_S)$$
+
+```
+L_KD = alpha * T^2 * KL(p_T || p_S) + (1-alpha) * BCE(y, p_S)
+```
 
 ### Representation-Level KD
 MSE loss between teacher and student pose tokens:
-$$\mathcal{L}_{repr} = ||z_T - z_S||^2$$
+
+```
+L_repr = ||z_T - z_S||^2
+```
 
 ### Combined KD
-$$\mathcal{L} = \alpha_{out} \cdot \mathcal{L}_{KD} + \alpha_{repr} \cdot \mathcal{L}_{repr} + (1-\alpha_{out}-\alpha_{repr}) \cdot BCE$$
+
+```
+L = alpha_out * L_KD + alpha_repr * L_repr + (1-alpha_out-alpha_repr) * BCE
+```
 
 ## Results
 
@@ -151,24 +225,17 @@ $$\mathcal{L} = \alpha_{out} \cdot \mathcal{L}_{KD} + \alpha_{repr} \cdot \mathc
 
 ```
 pose_to_intent/
-├── models.py           # Teacher and student model definitions
-├── data.py             # Data pipeline (JAAD loading, feature engineering)
-├── train.py            # Training loop
-├── evaluate.py         # Evaluation metrics
-├── train_teacher.py    # Script to train teacher model
-├── train_student.py    # Script to train student with/without KD
-├── evaluate_model.py   # Script to evaluate a trained model
-└── README.md           # This file
+├── extract_poses.py       # ViTPose keypoint extraction
+├── extract_seg_maps.py    # Mask2Former segmentation extraction
+├── models.py              # Teacher and student model definitions
+├── data.py                # Data pipeline (JAAD loading, feature engineering)
+├── train.py               # Training loop
+├── evaluate.py            # Evaluation metrics
+├── train_teacher.py       # Script to train teacher model
+├── train_student.py       # Script to train student with/without KD
+├── evaluate_model.py      # Script to evaluate a trained model
+└── README.md              # This file
 ```
 
 ## Citation
 
-If you use this code, please cite:
-
-```bibtex
-@inproceedings{pedestrian_action_benchmark,
-  title={Pedestrian Action Recognition Benchmark},
-  author={...},
-  year={2024}
-}
-```

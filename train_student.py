@@ -4,6 +4,7 @@ Student: Conv1D/GRU/Transformer (~53K params, AUC=0.864)
 Teacher: TrafficVehicleTransformer (~430K params, AUC=0.934)
 
 Usage:
+    export JAAD_PATH=/path/to/JAAD
     python train_student.py                    # Train without KD
     python train_student.py --use_kd           # Train with KD
     python train_student.py --use_repr_kd      # Train with representation KD
@@ -22,14 +23,13 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, os.path.dirname(__file__))
-from data import build_data, compute_pose_features
+from data import build_data, compute_pose_features, get_jaad_path
 from models import TeacherModel, StudentConv1D, StudentGRU, StudentTransformer
 from evaluate import evaluate
 
 warnings.filterwarnings('ignore', message='.*enable_nested_tensor.*')
 
-JAAD_PATH = '/home/nour/thesis_project/JAAD'
-OUTPUT_DIR = os.path.expanduser('~/ped_data/pose_to_intent/student')
+OUTPUT_DIR = os.path.expanduser(os.environ.get('SAVE_DIR', '~/ped_data/pose_to_intent/student'))
 EPOCHS = 20
 BATCH_SIZE = 32
 SEED = 42
@@ -316,17 +316,19 @@ def main():
     print(f"  STUDENT TRAINING — {args.model.upper()}")
     print("=" * 60)
 
+    jaad_path = get_jaad_path()
+
     # Load data
     print("\nLoading data...")
-    train_data = build_data(JAAD_PATH, 'train', sample_type='all',
+    train_data = build_data(jaad_path, 'train', sample_type='all',
                             use_enriched_bbox=True, use_seg=True, seg_dual_frame=True,
                             use_pose=True, use_vehicle=True, use_traffic=True,
                             norm_method='bbox_size')
-    val_data = build_data(JAAD_PATH, 'val', sample_type='all',
+    val_data = build_data(jaad_path, 'val', sample_type='all',
                           use_enriched_bbox=True, use_seg=True, seg_dual_frame=True,
                           use_pose=True, use_vehicle=True, use_traffic=True,
                           norm_method='bbox_size')
-    test_data = build_data(JAAD_PATH, 'test', sample_type='all',
+    test_data = build_data(jaad_path, 'test', sample_type='all',
                            use_enriched_bbox=True, use_seg=True, seg_dual_frame=True,
                            use_pose=True, use_vehicle=True, use_traffic=True,
                            norm_method='bbox_size')
